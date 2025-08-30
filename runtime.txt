@@ -1,1 +1,2 @@
-python-3.11.5
+python-3.10.12  
+# Python 3.10 kullan (imghdr sorunu yok)

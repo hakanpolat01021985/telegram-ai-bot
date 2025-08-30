@@ -1,9 +1,9 @@
 import os
-import telegram
-from telegram.ext import Updater, CommandHandler
+from telegram.ext import Application, CommandHandler
 
 # BotFather'dan aldığınız API Token'ı buraya girin
-BOT_TOKEN = os.environ["BOT_TOKEN"]
+# Token'ı artık Render'ın ortam değişkenlerinden alacağız
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 # /start komutu geldiğinde çalışacak fonksiyon
 async def start(update, context):
@@ -11,11 +11,11 @@ async def start(update, context):
 
 def main():
     # Telegram botu oluşturma
-    application = telegram.Application.builder().token(BOT_TOKEN).build()
-    
+    application = Application.builder().token(BOT_TOKEN).build()
+
     # /start komutunu dinlemesi için bir Handler ekleme
     application.add_handler(CommandHandler("start", start))
-    
+
     # Botu çalıştırma
     application.run_polling()
 

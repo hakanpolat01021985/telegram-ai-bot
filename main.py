@@ -1,90 +1,175 @@
 import os
+import logging
+from flask import Flask, request, jsonify
+import telegram
+from telegram import Update, Bot
+from telegram.ext import Dispatcher, MessageHandler, Filters, CallbackContext
 import google.generativeai as genai
-from telegram import Update
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    filters, ContextTypes
-)
-import asyncio
 
-# ================== AYARLAR ==================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Flask uygulamasını oluştur
+app = Flask(__name__)
 
-# Gemini yapılandırması
+# Loglama ayarları
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Çevresel değişkenler
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
+
+# Gemini AI yapılandırması - GEMINI 2.5 FLASH
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
 
-# Şirket bilgilerini modele öğretme
-COMPANY_INFO = """
-Sen bir müşteri destek botusun.
-Şirket: Hiper Televizyon (IPTV hizmeti).
-Müşterilere IPTV kanalları, paketler, fiyatlar ve kurulum hakkında yardımcı olabilirsin.
-Eğer kullanıcı teknik destek isterse 'Teknik ekibimiz en kısa sürede sizinle iletişime geçecektir.' de.
-Eğer fiyat sorulursa, kesin fiyat vermek yerine 'Size en uygun paketlerimizi müşteri temsilcimiz paylaşabilir.' de.
-Her zaman kibar ve profesyonel cevap ver.
-"""
+# Gemini 2.5 Flash modelini kullan
+generation_config = {
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "top_k": 40,
+    "max_output_tokens": 1024,
+}
 
-# Kullanıcı zaman takibi (AFK kontrolü)
-last_message_time = {}
+safety_settings = [
+    {
+        "category": "HARM_CATEGORY_HARASSMENT",
+        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+    },
+    {
+        "category": "HARM_CATEGORY_HATE_SPEECH",
+        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+    },
+    {
+        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+    },
+    {
+        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+    },
+]
 
-# ================== KOMUTLAR ==================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    last_message_time[user_id] = asyncio.get_event_loop().time()
-    await update.message.reply_text(
-        "👋 Merhaba, Hiper Televizyon müşteri destek botuna hoş geldiniz!\n"
-        "Nasıl yardımcı olabilirim?"
-    )
+# Gemini 2.5 Flash modelini oluştur
+model = genai.GenerativeModel(
+    model_name="gemini-2.5-flash",
+    generation_config=generation_config,
+    safety_settings=safety_settings
+)
 
-async def yardim(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📌 Kullanabileceğiniz komutlar:\n"
-        "/yardim - Komutları gör\n"
-        "/canli - Canlı müşteri temsilcisine bağlanma talebi\n"
-    )
+# Bot ve dispatcher oluştur
+bot = Bot(token=TELEGRAM_TOKEN)
+dispatcher = Dispatcher(bot, None, workers=0)
 
-async def canli(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "✅ Talebiniz alındı. Canlı müşteri temsilcimiz en kısa sürede sizinle iletişime geçecektir."
-    )
+# Konuşma geçmişini saklamak için basit bir sözlük
+conversation_history = {}
 
-# ================== MESAJ CEVAPLAMA ==================
-async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    last_message_time[user_id] = asyncio.get_event_loop().time()
+def gemini_response(user_id, prompt):
+    """Gemini 2.5 Flash'tan yanıt al"""
+    try:
+        # Konuşma geçmişini al veya oluştur
+        if user_id not in conversation_history:
+            conversation_history[user_id] = model.start_chat(history=[])
+        
+        # Gemini'ye mesaj gönder ve yanıt al
+        response = conversation_history[user_id].send_message(prompt)
+        return response.text
+        
+    except Exception as e:
+        logger.error(f"Gemini hatası: {e}")
+        return "Üzgünüm, bir hata oluştu. Lütfen daha sonra tekrar deneyin."
 
-    user_message = update.message.text
+def handle_message(update: Update, context: CallbackContext):
+    """Gelen mesajları işle"""
+    try:
+        message = update.message
+        user_id = message.from_user.id
+        text = message.text
+        
+        logger.info(f"Gelen mesaj: {text} - Kullanıcı: {user_id}")
+        
+        # Gemini'den yanıt al
+        response = gemini_response(user_id, text)
+        
+        # Kullanıcıya yanıt gönder (Telegram mesaj sınırına dikkat ederek)
+        if len(response) > 4096:
+            for x in range(0, len(response), 4096):
+                message.reply_text(response[x:x+4096])
+        else:
+            message.reply_text(response)
+        
+    except Exception as e:
+        logger.error(f"Mesaj işleme hatası: {e}")
+        try:
+            message.reply_text("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+        except:
+            pass
 
-    # Gemini’ye soruyu şirket bilgileriyle gönder
-    response = model.generate_content(f"{COMPANY_INFO}\n\nMüşteri: {user_message}")
-    await update.message.reply_text(response.text)
+# /start komutu için handler
+def start(update: Update, context: CallbackContext):
+    """Kullanıcıyı karşılayan mesaj"""
+    welcome_text = """
+    🤖 Merhaba! Ben Gemini 2.5 Flash destekli müşteri hizmetleri botuyum.
+    
+    Nasıl yardımcı olabilirim? Sorunuzu iletebilirsiniz.
+    """
+    update.message.reply_text(welcome_text)
 
-# ================== OTOMATİK KAPANIŞ ==================
-async def afk_checker(app: Application):
-    while True:
-        now = asyncio.get_event_loop().time()
-        for user_id, last_time in list(last_message_time.items()):
-            if now - last_time > 300:  # 5 dakika
-                chat = await app.bot.get_chat(user_id)
-                await chat.send_message("⌛ Görüşme sona erdi. Tekrar yazmak için /start kullanabilirsiniz.")
-                del last_message_time[user_id]
-        await asyncio.sleep(60)
+# /help komutu için handler
+def help_command(update: Update, context: CallbackContext):
+    """Yardım mesajı gönder"""
+    help_text = """
+    🤖 Yardım Menüsü:
+    
+    • Sadece sorunuzu yazın, ben yanıtlamaya çalışayım.
+    • Doğal dilde iletişim kurabiliriz.
+    • Karmaşık sorularınızı basitçe ifade edebilirsiniz.
+    
+    Örnek sorular:
+    - "Ürün iade politikası nedir?"
+    - "Siparişim nerede?"
+    - "Teknik destek almak istiyorum"
+    """
+    update.message.reply_text(help_text)
 
-# ================== ANA UYGULAMA ==================
-def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+# Komut işleyicileri ekle
+from telegram.ext import CommandHandler
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("help", help_command))
+dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("yardim", yardim))
-    app.add_handler(CommandHandler("canli", canli))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Telegram webhook endpoint"""
+    try:
+        # Gelen update'i al
+        update = Update.de_json(request.get_json(force=True), bot)
+        
+        # Update'i dispatcher'a ileterek işle
+        dispatcher.process_update(update)
+        
+        return jsonify(success=True)
+    except Exception as e:
+        logger.error(f"Webhook hatası: {e}")
+        return jsonify(success=False), 500
 
-    # AFK kontrolünü arka planda çalıştır
-    app.job_queue.run_once(lambda ctx: asyncio.create_task(afk_checker(app)), 1)
+@app.route('/set_webhook', methods=['GET'])
+def set_webhook():
+    """Webhook'u ayarla"""
+    try:
+        webhook_url = f"{WEBHOOK_URL}/webhook"
+        success = bot.set_webhook(webhook_url)
+        return jsonify(success=success, url=webhook_url)
+    except Exception as e:
+        logger.error(f"Webhook ayarlama hatası: {e}")
+        return jsonify(success=False), 500
 
-    print("🚀 Bot çalışıyor...")
-    app.run_polling()
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Sağlık kontrol endpoint'i"""
+    return jsonify(status="OK", message="Bot çalışıyor")
 
-if __name__ == "__main__":
-    main()
+@app.route('/')
+def index():
+    return "Telegram Müşteri Destek Botu (Gemini 2.5 Flash) Aktif!"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)

@@ -50,7 +50,7 @@ safety_settings = [
 
 # Gemini 2.5 Flash modelini oluştur
 model = genai.GenerativeModel(
-    model_name="gemini-2.5-flash",
+    model_name="gemini-2.0-flash",  # Güncel model ismi
     generation_config=generation_config,
     safety_settings=safety_settings
 )
@@ -107,7 +107,7 @@ def handle_message(update: Update, context: CallbackContext):
 def start(update: Update, context: CallbackContext):
     """Kullanıcıyı karşılayan mesaj"""
     welcome_text = """
-    🤖 Merhaba! Ben Gemini 2.5 Flash destekli müşteri hizmetleri botuyum.
+    🤖 Merhaba! Ben Gemini Flash destekli müşteri hizmetleri botuyum.
     
     Nasıl yardımcı olabilirim? Sorunuzu iletebilirsiniz.
     """
@@ -169,7 +169,7 @@ def health_check():
 
 @app.route('/')
 def index():
-    return "Telegram Müşteri Destek Botu (Gemini 2.5 Flash) Aktif!"
+    return "Telegram Müşteri Destek Botu (Gemini Flash) Aktif!"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

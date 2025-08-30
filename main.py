@@ -13,9 +13,10 @@ logger = logging.getLogger(__name__)
 # Çevresel değişkenler
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
+WEBHOOK_URL = os.environ.get('RENDER_EXTERNAL_URL') or os.environ.get('WEBHOOK_URL')
 
 # Hata ayıklama için değişkenleri logla
+logger.info("Uygulama başlatılıyor...")
 logger.info(f"TELEGRAM_TOKEN: {'***' if TELEGRAM_TOKEN else 'MISSING'}")
 logger.info(f"GEMINI_API_KEY: {'***' if GEMINI_API_KEY else 'MISSING'}")
 logger.info(f"WEBHOOK_URL: {WEBHOOK_URL or 'MISSING'}")
@@ -37,8 +38,9 @@ except Exception as e:
 def index():
     return jsonify({
         "status": "online",
-        "service": "Telegram Support Bot",
-        "gemini_configured": model is not None
+        "service": "Telegram Support Bot with Gemini",
+        "gemini_configured": model is not None,
+        "environment": "production"
     })
 
 @app.route('/health')
@@ -56,10 +58,10 @@ def test_gemini():
         return jsonify({"error": "Gemini not configured"}), 500
     
     try:
-        response = model.generate_content("Merhaba, nasılsın?")
+        response = model.generate_content("Merhaba, nasılsın? Kendini kısaca tanıtır mısın?")
         return jsonify({
             "success": True,
-            "response": response.text
+            "response": response.text[:500] + "..." if len(response.text) > 500 else response.text
         })
     except Exception as e:
         return jsonify({
@@ -69,17 +71,29 @@ def test_gemini():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    # Basit webhook endpoint - daha sonra Telegram entegrasyonu eklenecek
-    return jsonify({"status": "webhook_received"})
+    try:
+        data = request.get_json()
+        logger.info(f"Webhook received: {data}")
+        return jsonify({"status": "success", "message": "Webhook received"})
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/set_webhook', methods=['GET'])
+@app.route('/set-webhook', methods=['GET', 'POST'])
 def set_webhook():
-    # Basit webhook ayarlama - daha sonra Telegram entegrasyonu eklenecek
+    if not WEBHOOK_URL:
+        return jsonify({"status": "error", "message": "WEBHOOK_URL not configured"}), 500
+    
+    webhook_url = f"{WEBHOOK_URL}/webhook"
     return jsonify({
-        "status": "webhook_set",
-        "url": f"{WEBHOOK_URL}/webhook" if WEBHOOK_URL else "Not configured"
+        "status": "success",
+        "message": "Webhook URL generated",
+        "webhook_url": webhook_url,
+        "instructions": "Set this URL in your Telegram bot settings"
     })
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    # Production için Gunicorn kullanılacak, bu kısım sadece development için
+    port = int(os.environ.get('PORT', 10000))
+    logger.info(f"Starting server on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)

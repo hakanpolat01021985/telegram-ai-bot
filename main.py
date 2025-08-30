@@ -3,7 +3,7 @@ import telegram
 from telegram.ext import Updater, CommandHandler
 
 # BotFather'dan aldığınız API Token'ı buraya girin
-BOT_TOKEN = "8490762605:AAHNFyHkOEZhgsFReyRKOSQ8exDSlgQnEwY"
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 # /start komutu geldiğinde çalışacak fonksiyon
 async def start(update, context):

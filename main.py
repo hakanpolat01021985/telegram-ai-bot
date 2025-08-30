@@ -5,7 +5,7 @@ import google.generativeai as genai
 
 # Gemini API anahtarını Render'ın ortam değişkenlerinden al
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # /start komutu
 async def start(update, context):
